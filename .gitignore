@@ -6,6 +6,7 @@
 *.geany
 *.txt
 *.dgn
+*.pcm
 *~
 moc/*
 Makefile
