@@ -43,7 +43,7 @@ void writeSample(const char* filename, double* sample, int sampleLength){
 
 // TODO: attack and release do not work, cause extreme clipping
 // applies an envelope to strength given time
-double applyEnvelope(int i, double length, double strengthInit, double a, double s, double d, double r){
+double applyEnvelope(int i, int length, double strengthInit, double a, double s, double d, double r){
 	double iSeconds = (double)i / SAMPLE_RATE;
 
 	if(iSeconds < a){
@@ -66,19 +66,19 @@ double applyEnvelope(int i, double length, double strengthInit, double a, double
 */
 
 // generates a tone from a tone generator function
-void generateTone(double* samples, double length, double frequency, double amplitude, double (*toneGeneratorFunction)(int, double, double)){
+void generateTone(double* samples, int length, double frequency, double amplitude, double (*toneGeneratorFunction)(int, double, double)){
 	for(int i = 0; i < length; i ++){
 		samples[i] = amplitude * toneGeneratorFunction(i, frequency, amplitude);
 		
 		amplitude += applyEnvelope(
-								  i,
-								  length,
-								  amplitude,
-								  0.0,
-								  0.0,
-								  amplitude,
-								  0.0);
-		
+			i,
+			length,
+			amplitude,
+			0.0,
+			0.0,
+			amplitude,
+			0.0
+		);
 	}
 }
 
@@ -102,6 +102,12 @@ double generateNoise(int i, double frequency, double amplitude){
 	return (double)(rand())/ RAND_MAX;
 }
 
+/*
+################################
+	Sequence Functions
+################################
+*/
+
 // contains information about tone type, pitch, rhythm, and amplitude
 struct Sequence {
 	double (*toneGeneratorFunction)(int, double, double);
@@ -124,15 +130,16 @@ struct Sequence {
 void writeSequence(double* sample, double length, struct Sequence* seq){
 	int bufferPos = 0;
 	int nextNoteSpace = 0;
-	for(int i = 0; bufferPos < length * SAMPLE_RATE - (SAMPLE_RATE / (seq->tempo * seq->tones[1][i])); i = (i+1)%seq->length){
-		nextNoteSpace = SAMPLE_RATE / (seq->tempo * seq->tones[1][i]);
+	for(int i = 0;
+		bufferPos < (length * SAMPLE_RATE) - (nextNoteSpace = SAMPLE_RATE / (seq->tempo * seq->tones[1][i]));
+		i = (i+1)%seq->length){
 		generateTone(
-					 &sample[bufferPos],
-					 nextNoteSpace,
-					 seq->scale[seq->tones[0][i]],
-					 (double)seq->tones[2][i]/100,
-					 seq->toneGeneratorFunction
-					 );
+			&sample[bufferPos],
+			nextNoteSpace,
+			seq->scale[seq->tones[0][i]],
+			(double)seq->tones[2][i]/100,
+			seq->toneGeneratorFunction
+		);
 
 		bufferPos += nextNoteSpace;
 	}
@@ -140,9 +147,7 @@ void writeSequence(double* sample, double length, struct Sequence* seq){
 
 int main(int argv, char* argc[]){
 	double duration = 13.25;
-	double frequency = 110;
-	double amplitude = 0.8;
-	double* samples = (double*)malloc(sizeof(double) * duration * SAMPLE_RATE);
+	double *samples = (double*)malloc(sizeof(double) * duration * SAMPLE_RATE);
 	double *s = (double*)malloc(sizeof(double) * 24);
 	generateScale(s, 24, 220, 2, 12);
 
@@ -175,8 +180,9 @@ int main(int argv, char* argc[]){
 	*/
 
 	// write sample
-	writeSample(outputFile, samples, SAMPLE_RATE * duration);
+	writeSample(outputFile, samples, (int)(SAMPLE_RATE * duration));
 
+	free(s);
 	free(samples);
 
 	return 0;
