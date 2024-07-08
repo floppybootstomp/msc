@@ -7,21 +7,21 @@
 #define PI 3.1415926535
 
 // returns an array of frequencies given specified starting frequency, octave, and step size between octaves
-void generateScale(double* scale, int length, double frequency, int octave, int step){
+void generateScale(float* scale, int length, float frequency, int octave, int step){
 	scale[0] = frequency;
 
 	for(int i = 1; i <= length; i ++){
 		if(i % step == 0)
 			frequency *= octave;
 
-		scale[i] = frequency + (i % step * (frequency * octave - frequency) / step);
+		scale[i] = frequency + (i % step * (frequency * octave - frequency) * (1.0 / step));
 	}
 }
 
 // write a sample to a file
 // to play the file use aplay <filename> -r <samplerate> -f S16_LE
 // pcm to flac ffmpeg -f s16le -ar 44.1k -ac 2 -i <file>.pcm <file>.flac
-void writeSample(const char* filename, double* sample, int sampleLength){
+void writeSample(const char* filename, float* sample, int sampleLength){
 	// open file
 	FILE* f = fopen(filename, "wb");
 	if(f == NULL){
@@ -30,10 +30,10 @@ void writeSample(const char* filename, double* sample, int sampleLength){
 	}
 
 	for(int i = 0; i < sampleLength; i ++){
-        // int16_t is a 16 bit integer but sample[i] is a 64 bit double 0 < x < 1
-        // 
+		// int16_t is a 16 bit integer but sample[i] is a 64 bit double 0 < x < 1
+		// 
 		int16_t output = (int16_t)(0x7FFF * sample[i]);
-		fwrite(&output, sizeof(char), sizeof(int16_t)/sizeof(char), f);
+		fwrite(&output, sizeof(char), sizeof(int16_t) * (1.0/sizeof(char)), f);
 	}
 
 	// close file
@@ -41,21 +41,21 @@ void writeSample(const char* filename, double* sample, int sampleLength){
 }
 
 // applies an envelope to strength given time
-double applyEnvelope(int i, int length, double strengthInit, double currStrength, double a, double s, double d, double r){
-	double ca = 0;
+float applyEnvelope(int i, int length, float strengthInit, float currStrength, float a, float s, float d, float r){
+	float ca = 0;
 
 	if(i < a && currStrength < strengthInit)
-		ca = strengthInit / a;
+		ca = strengthInit * (1.0 / a);
 	else if(i < a && i < length-a)
 		ca = 0;
 
 	if(i > a && i < d + a && (strengthInit < s ? currStrength < s : currStrength > s))
-		ca = (s - strengthInit) / d;
+		ca = (s - strengthInit) * (1.0 / d);
 	else if(i > a && i < d)
 		ca = 0;
 
 	if(i > length-r && currStrength > 0)
-		ca = -1 * s / r;
+		ca = -1 * s * (1.0 / r);
 	else if(i > length-r)
 		ca = 0;
 
@@ -69,9 +69,9 @@ double applyEnvelope(int i, int length, double strengthInit, double currStrength
 */
 
 // generates a tone from a tone generator function
-void generateTone(double* samples, int filePos, int length, double frequency, double amplitude, double asdr[4], double (*toneGeneratorFunction)(int, double, double)){
-    int i = 0;
-	double dynAmp = 0.0;
+void generateTone(float* samples, int filePos, int length, float frequency, float amplitude, float asdr[4], float (*toneGeneratorFunction)(int, float, float)){
+	int i = 0;
+	float dynAmp = 0.0;
 	float ampTightness = 480;
 
 	for(i = 0; i < length; i ++){
@@ -90,23 +90,23 @@ void generateTone(double* samples, int filePos, int length, double frequency, do
 }
 
 // generate a sine tone
-double generateSine(int i, double frequency, double amplitude){
-	return sin(frequency * i * 2 * PI * 1/SAMPLE_RATE);
+float generateSine(int i, float frequency, float amplitude){
+	return sin(frequency * i * 2 * PI * (1.0 / SAMPLE_RATE));
 }
 
 // generate a square tone
-double generateSquare(int i, double frequency, double amplitude){
-	return (sin(frequency * i * (2 * PI) / SAMPLE_RATE) > 0) ? (1) : (-1);
+float generateSquare(int i, float frequency, float amplitude){
+	return (sin(frequency * i * (2 * PI) * (1.0 / SAMPLE_RATE)) > 0) ? (1) : (-1);
 }
 
 // generate a sawtooth tone
-double generateSawtooth(int i, double frequency, double amplitude){
-	return 0.636 * atan(tan(frequency * (i * (2 * PI) / SAMPLE_RATE)));
+float generateSawtooth(int i, float frequency, float amplitude){
+	return 0.636 * atan(tan(frequency * (i * (2 * PI) * (1.0 / SAMPLE_RATE))));
 }
 
 // generate noise
-double generateNoise(int i, double frequency, double amplitude){
-	return (double)(rand())/ RAND_MAX;
+float generateNoise(int i, float frequency, float amplitude){
+	return (float)(rand()) * (1.0 / RAND_MAX);
 }
 
 /*
@@ -117,8 +117,8 @@ double generateNoise(int i, double frequency, double amplitude){
 
 // contains information about tone type, pitch, rhythm, and amplitude
 struct Sequence {
-	double (*toneGeneratorFunction)(int, double, double);
-	double *scale;
+	float (*toneGeneratorFunction)(int, float, float);
+	float *scale;
 
 	// in beats per second
 	float tempo;
@@ -129,34 +129,34 @@ struct Sequence {
 	// length is the number of tones, totalLength is sum of the length of the tones
 	int length;
 	int totalLength;
-	double a, s, d, r;
+	float a, s, d, r;
 	// tones[][0] = pitch
 	// tones[][1] = rhythm (in fractions of a second: seconds / tones[][1])
 	// tones[][2] = amplitude (max: 100, min: 0)
-	double* tones[3];
+	float* tones[3];
 };
 
 // writes a sequence to a sample buffer
-void writeSequence(double* sample, double length, struct Sequence* seq){
+void writeSequence(float* sample, float length, struct Sequence* seq){
 	int bufferPos = 0;
 	int nextNoteSpace = 0;
-	double totalLength = 0;
-	double asdr[] = { seq->a, seq->s, seq->d, seq->r };
+	float totalLength = 0;
+	float asdr[] = { seq->a, seq->s, seq->d, seq->r };
 
 	for(int i = 0; i < seq->length; i ++){
 		totalLength += seq->tones[1][i];
 	}
-	totalLength *= (SAMPLE_RATE / seq->tempo);
+	totalLength *= (SAMPLE_RATE * (1.0 / seq->tempo));
 
 	for(int i = 0;
-		bufferPos <= length - (nextNoteSpace = SAMPLE_RATE /	(seq->tempo * seq->tones[1][i]));
+		bufferPos <= length - (nextNoteSpace = SAMPLE_RATE * (1.0 / (seq->tempo * seq->tones[1][i])));
 		i = (i+1)%seq->length){
 		generateTone(
 			&sample[bufferPos],
 			bufferPos,
 			nextNoteSpace,
 			seq->scale[(int)seq->tones[0][i]],
-			seq->tones[2][i]/100,
+			seq->tones[2][i] * 0.01,
 			asdr,
 			seq->toneGeneratorFunction
 		);
@@ -166,26 +166,26 @@ void writeSequence(double* sample, double length, struct Sequence* seq){
 }
 
 // writes a the sequences into a buffer based on the track arrangement for that sequence
-void writeTrackBuffer(double* sampleBuffer, double length, struct Sequence* seq, int songLength, double tracks[songLength]){
+void writeTrackBuffer(float* sampleBuffer, float length, struct Sequence* seq, int songLength, float tracks[songLength]){
 	for(int i = 0; i < length * SAMPLE_RATE; i ++)
 		sampleBuffer[i] = 0;
 
-	double bufferPos = 0;
+	float bufferPos = 0;
 	for(int trackPos = 0; trackPos < songLength; trackPos ++){
 		if(trackPos > 0)
 			bufferPos += tracks[trackPos-1] > 0 ? tracks[trackPos-1] : -1 * tracks[trackPos-1];
 
-		if(tracks[trackPos] > 0){
+		if(tracks[trackPos] > 0)
 			writeSequence(&sampleBuffer[(int)(seq->totalLength * bufferPos)], seq->totalLength * tracks[trackPos], seq);
-		}
 	}
 }
+
 // combines sequence buffers into master sequence
-void writeMaster(double* master, double length, struct Sequence* seq[], int numTracks, int songLength, double tracks[numTracks][songLength]){
+void writeMaster(float* master, float length, struct Sequence* seq[], int numTracks, int songLength, float tracks[numTracks][songLength]){
 	for(int i = 0; i < length * SAMPLE_RATE; i ++)
 		master[i] = 0;
 
-	double *sampleBuffer = (double*)malloc(sizeof(double) * length * SAMPLE_RATE);
+	float *sampleBuffer = (float*)malloc(sizeof(float) * length * SAMPLE_RATE);
 	for(int trax = 0; trax < numTracks; trax ++){
 		writeTrackBuffer(sampleBuffer, length, seq[trax], songLength, &tracks[trax][0]);
 
@@ -196,31 +196,31 @@ void writeMaster(double* master, double length, struct Sequence* seq[], int numT
 }
 
 // calculates the length of a sequence given the rhythm lengths
-double calculateSequenceLength(double rhy[], int length){
-	double totalLength = 0;
+float calculateSequenceLength(float rhy[], int length){
+	float totalLength = 0;
 	for(int i = 0; i < length; i ++){
-		totalLength += 1/rhy[i];
+		totalLength += 1.0 / rhy[i];
 	}
 
 	return totalLength;
 }
 
 int main(int argv, char* argc[]){
-	double duration = 17 * 6;
+	float duration = 17 * 6;
 	int	songLength = 4;
-	double* master = (double*)malloc(sizeof(double) * duration * songLength * SAMPLE_RATE);
-	double* s = (double*)malloc(sizeof(double) * 24);
+	float* master = (float*)malloc(sizeof(float) * duration * songLength * SAMPLE_RATE);
+	float* s = (float*)malloc(sizeof(float) * 24);
 	generateScale(s, 24, 220, 2, 12);
 
 	char* outputFile = "./data/prunes.pcm";
 
-	double de = 8.0/3.0;
-	double aa = 60;
-	double ton[38] = { 17, 15, 14, 12, 14, 15, 14, 12, 10, 10, 12, 14, 15, 14, 17, 12, 12, 17, 15, 14,
+	float de = 8.0/3.0;
+	float aa = 60;
+	float ton[38] = { 17, 15, 14, 12, 14, 15, 14, 12, 10, 10, 12, 14, 15, 14, 17, 12, 12, 17, 15, 14,
 					   17, 15, 14, 12, 14, 15, 14, 12, 10, 10, 12, 14, 15, 14, 17, 12, 12, 12 };
-	double rhy[38] = { 4 , 8 , 4 , 4 , 4 , 8 , 8 , 8 , 4 , de, de, 8 , de, 4 , 4 , de, 2 , 4 , 8 , 2 ,
+	float rhy[38] = { 4 , 8 , 4 , 4 , 4 , 8 , 8 , 8 , 4 , de, de, 8 , de, 4 , 4 , de, 2 , 4 , 8 , 2 ,
 					   4 , 8 , 4 , 4 , 4 , 8 , 8 , 8 , 4 , de, de, 8 , de, 4 , 4 , de, 2 , 8.0/7.0 };
-	double amp[38] = { aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa,
+	float amp[38] = { aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa,
 					   aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa };
 
 	struct Sequence seq = {
@@ -229,17 +229,17 @@ int main(int argv, char* argc[]){
 		0.5,
 		1,
 		38,
-		(int)(calculateSequenceLength(rhy, 38) * SAMPLE_RATE/(0.5)),
-		0, aa/100, 0, 0,
+		(int)(calculateSequenceLength(rhy, 38) * SAMPLE_RATE * 2),
+		0, aa * 0.01, 0, 0,
 		{ton, rhy, amp}
 	};
 
-	double ab = 80-aa;
-	double ac = ab/2;
-	double ad = ab/4;
-	double tonR[8] = { 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0  };
-	double rhyR[8] = { 4 , 8 , 4 , 4 , 4 , 8 , 4 , 4  };
-	double ampR[8] = { ab, ad, ac, ac, ab, ad, ac, ad };
+	float ab = 80-aa;
+	float ac = ab * 0.5;
+	float ad = ab * 0.25;
+	float tonR[8] = { 0 , 0 , 0 , 0 , 0 , 0 , 0 , 0  };
+	float rhyR[8] = { 4 , 8 , 4 , 4 , 4 , 8 , 4 , 4  };
+	float ampR[8] = { ab, ad, ac, ac, ab, ad, ac, ad };
 
 	struct Sequence seqR = {
 		&generateNoise,
@@ -247,17 +247,17 @@ int main(int argv, char* argc[]){
 		0.5,
 		1,
 		8,
-		(int)(calculateSequenceLength(rhyR, 8) * SAMPLE_RATE/(0.5)),
-		0, 0, SAMPLE_RATE/16, 0,
+		(int)(calculateSequenceLength(rhyR, 8) * SAMPLE_RATE * 2),
+		0, 0, SAMPLE_RATE * 0.0625, 0,
 		{tonR, rhyR, ampR}
 	};
 
 	// order tracks
 	int numTracks = 2;
-	int rl = seq.totalLength/seqR.totalLength;
-	double in = -0.25;
-	double ir = -1 * in * seq.totalLength/seqR.totalLength;
-	double tracks[2][11] = {
+	int rl = seq.totalLength * (1.0 / seqR.totalLength);
+	float in = -0.25;
+	float ir = -1 * in * seq.totalLength * (1.0 / seqR.totalLength);
+	float tracks[2][11] = {
 		{ in,  1,  1, in,  1,  1, in },
 		{ ir, rl, rl, ir, rl, rl, ir }
 	};

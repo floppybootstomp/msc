@@ -7,8 +7,9 @@
 *.txt
 *.dgn
 *.pcm
+*.flac
 *~
 moc/*
-Makefile
+data/*
 rl
 sine
