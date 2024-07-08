@@ -20,7 +20,7 @@ void generateScale(float* scale, int length, float frequency, int octave, int st
 
 // write a sample to a file
 // to play the file use aplay <filename> -r <samplerate> -f S16_LE
-// pcm to flac ffmpeg -f s16le -ar 44.1k -ac 2 -i <file>.pcm <file>.flac
+// pcm to flac ffmpeg -f s16le -ar 44.1k -ac 1 -i <file>.pcm <file>.flac
 void writeSample(const char* filename, float* sample, int sampleLength){
 	// open file
 	FILE* f = fopen(filename, "wb");
