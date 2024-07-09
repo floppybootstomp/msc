@@ -115,6 +115,7 @@ float generateNoise(int i, float frequency, float amplitude){
 ################################
 */
 
+// TODO: Automatically compute totalLength so that calculateSequenceLength can be hidden
 // contains information about tone type, pitch, rhythm, and amplitude
 struct Sequence {
 	float (*toneGeneratorFunction)(int, float, float);
@@ -130,10 +131,21 @@ struct Sequence {
 	int length;
 	int totalLength;
 	float a, s, d, r;
+
 	// tones[][0] = pitch
 	// tones[][1] = rhythm (in fractions of a second: seconds / tones[][1])
 	// tones[][2] = amplitude (max: 100, min: 0)
 	float* tones[3];
+};
+
+// TODO: change the length to be in segments based on SAMPLE_RATE and tempo rather than relative to each other
+// contains information about a track's sequence and length for arrangement
+struct Track {
+	// the length of the track
+	float length;
+
+	// the sequence this track plays
+	struct Sequence seq;
 };
 
 // writes a sequence to a sample buffer
@@ -166,28 +178,32 @@ void writeSequence(float* sample, float length, struct Sequence* seq){
 }
 
 // writes a the sequences into a buffer based on the track arrangement for that sequence
-void writeTrackBuffer(float* sampleBuffer, float length, struct Sequence* seq, int songLength, float tracks[songLength]){
+void writeTrackBuffer(float* sampleBuffer, float length, int songLength, struct Track tracks[songLength]){
 	for(int i = 0; i < length * SAMPLE_RATE; i ++)
 		sampleBuffer[i] = 0;
 
 	float bufferPos = 0;
 	for(int trackPos = 0; trackPos < songLength; trackPos ++){
 		if(trackPos > 0)
-			bufferPos += tracks[trackPos-1] > 0 ? tracks[trackPos-1] : -1 * tracks[trackPos-1];
+			bufferPos += tracks[trackPos-1].length > 0 ? tracks[trackPos-1].length : -1 * tracks[trackPos-1].length;
 
-		if(tracks[trackPos] > 0)
-			writeSequence(&sampleBuffer[(int)(seq->totalLength * bufferPos)], seq->totalLength * tracks[trackPos], seq);
+		if(tracks[trackPos].length > 0)
+			writeSequence(
+				&sampleBuffer[(int)(tracks[trackPos].seq.totalLength * bufferPos)],
+				tracks[trackPos].seq.totalLength * tracks[trackPos].length,
+				&tracks[trackPos].seq
+			);
 	}
 }
 
 // combines sequence buffers into master sequence
-void writeMaster(float* master, float length, struct Sequence* seq[], int numTracks, int songLength, float tracks[numTracks][songLength]){
+void writeMaster(float* master, float length, int numTracks, int songLength, struct Track tracks[numTracks][songLength]){
 	for(int i = 0; i < length * SAMPLE_RATE; i ++)
 		master[i] = 0;
 
 	float *sampleBuffer = (float*)malloc(sizeof(float) * length * SAMPLE_RATE);
 	for(int trax = 0; trax < numTracks; trax ++){
-		writeTrackBuffer(sampleBuffer, length, seq[trax], songLength, &tracks[trax][0]);
+		writeTrackBuffer(sampleBuffer, length, songLength, &tracks[trax][0]);
 
 		for(int i = 0; i < length * SAMPLE_RATE; i ++){
 			master[i] += sampleBuffer[i];
@@ -217,11 +233,11 @@ int main(int argv, char* argc[]){
 	float de = 8.0/3.0;
 	float aa = 60;
 	float ton[38] = { 17, 15, 14, 12, 14, 15, 14, 12, 10, 10, 12, 14, 15, 14, 17, 12, 12, 17, 15, 14,
-					   17, 15, 14, 12, 14, 15, 14, 12, 10, 10, 12, 14, 15, 14, 17, 12, 12, 12 };
+					  17, 15, 14, 12, 14, 15, 14, 12, 10, 10, 12, 14, 15, 14, 17, 12, 12, 12 };
 	float rhy[38] = { 4 , 8 , 4 , 4 , 4 , 8 , 8 , 8 , 4 , de, de, 8 , de, 4 , 4 , de, 2 , 4 , 8 , 2 ,
-					   4 , 8 , 4 , 4 , 4 , 8 , 8 , 8 , 4 , de, de, 8 , de, 4 , 4 , de, 2 , 8.0/7.0 };
+					  4 , 8 , 4 , 4 , 4 , 8 , 8 , 8 , 4 , de, de, 8 , de, 4 , 4 , de, 2 , 8.0/7.0 };
 	float amp[38] = { aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa,
-					   aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa };
+					  aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa };
 
 	struct Sequence seq = {
 		&generateSine,
@@ -253,17 +269,17 @@ int main(int argv, char* argc[]){
 	};
 
 	// order tracks
-	int numTracks = 2;
-	int rl = seq.totalLength * (1.0 / seqR.totalLength);
-	float in = -0.25;
-	float ir = -1 * in * seq.totalLength * (1.0 / seqR.totalLength);
-	float tracks[2][11] = {
-		{ in,  1,  1, in,  1,  1, in },
-		{ ir, rl, rl, ir, rl, rl, ir }
+	struct Track mp = { 1, seq };
+	struct Track ms = { -0.25, seq };
+	struct Track rp = { seq.totalLength * (1.0 / seqR.totalLength), seqR };
+	struct Track rs = { -1 * ms.length * rp.length, seqR };
+
+	struct Track tracks[2][11] = {
+		{ ms, mp, mp, ms, mp, mp, ms },
+		{ rs, rp, rp, rs, rp, rp, rs }
 	};
-	// write sequence
-	struct Sequence* SeqList[] = { &seq, &seqR };
-	writeMaster(master, duration, SeqList, 2, 11, tracks);
+
+	writeMaster(master, duration, 2, 11, tracks);
 
 	// write sample
 	writeSample(outputFile, master, (int)(SAMPLE_RATE * duration));
