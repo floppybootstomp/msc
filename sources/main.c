@@ -5,6 +5,7 @@
 
 #define SAMPLE_RATE 44100
 #define PI 3.1415926535
+#define CLAMP(v, hi, lo) v > hi ? hi : (v < lo ? lo : v)
 
 // returns an array of frequencies given specified starting frequency, octave, and step size between octaves
 void generateScale(float* scale, int length, float frequency, int octave, int step){
@@ -148,6 +149,33 @@ struct Track {
 	struct Sequence seq;
 };
 
+// calculates the length of a sequence given the rhythm lengths
+static float calculateSequenceLength(float rhy[], int length){
+	float totalLength = 0;
+	for(int i = 0; i < length; i ++){
+		totalLength += 1.0 / rhy[i];
+	}
+
+	return totalLength;
+}
+
+// initializes a sequence with given values
+struct Sequence initializeSequence(float (*toneGeneratorFunction)(int, float, float), float* scale, float tempo, float repeat, int length, float a, float s, float d, float r, float* tones[3]){
+	return ((struct Sequence) {
+		toneGeneratorFunction,
+		scale,
+		tempo,
+		repeat,
+		length,
+		(int)(calculateSequenceLength(tones[1], length) * SAMPLE_RATE * 2),
+		a,
+		s,
+		d,
+		r,
+		{ tones[0], tones[1], tones[2] }
+	});
+}
+
 // writes a sequence to a sample buffer
 void writeSequence(float* sample, float length, struct Sequence* seq){
 	int bufferPos = 0;
@@ -206,19 +234,10 @@ void writeMaster(float* master, float length, int numTracks, int songLength, str
 		writeTrackBuffer(sampleBuffer, length, songLength, &tracks[trax][0]);
 
 		for(int i = 0; i < length * SAMPLE_RATE; i ++){
-			master[i] += sampleBuffer[i];
+			// limiter on master to prevent blowing out speakers
+			master[i] = CLAMP(master[i] + sampleBuffer[i], 1, -1);
 		}
 	}
-}
-
-// calculates the length of a sequence given the rhythm lengths
-float calculateSequenceLength(float rhy[], int length){
-	float totalLength = 0;
-	for(int i = 0; i < length; i ++){
-		totalLength += 1.0 / rhy[i];
-	}
-
-	return totalLength;
 }
 
 int main(int argv, char* argc[]){
@@ -239,16 +258,16 @@ int main(int argv, char* argc[]){
 	float amp[38] = { aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa,
 					  aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa };
 
-	struct Sequence seq = {
+	float* tones[3] = {ton, rhy, amp};
+	struct Sequence seq = initializeSequence(
 		&generateSine,
 		s,
 		0.5,
 		1,
 		38,
-		(int)(calculateSequenceLength(rhy, 38) * SAMPLE_RATE * 2),
 		0, aa * 0.01, 0, 0,
-		{ton, rhy, amp}
-	};
+		tones
+	);
 
 	float ab = 80-aa;
 	float ac = ab * 0.5;
@@ -257,16 +276,16 @@ int main(int argv, char* argc[]){
 	float rhyR[8] = { 4 , 8 , 4 , 4 , 4 , 8 , 4 , 4  };
 	float ampR[8] = { ab, ad, ac, ac, ab, ad, ac, ad };
 
-	struct Sequence seqR = {
+	float* tonesR[3] = {tonR, rhyR, ampR};
+	struct Sequence seqR = initializeSequence(
 		&generateNoise,
 		s,
 		0.5,
 		1,
 		8,
-		(int)(calculateSequenceLength(rhyR, 8) * SAMPLE_RATE * 2),
 		0, 0, SAMPLE_RATE * 0.0625, 0,
-		{tonR, rhyR, ampR}
-	};
+		tonesR
+	);
 
 	// order tracks
 	struct Track mp = { 1, seq };
