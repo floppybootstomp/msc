@@ -116,7 +116,6 @@ float generateNoise(int i, float frequency, float amplitude){
 ################################
 */
 
-// TODO: Automatically compute totalLength so that calculateSequenceLength can be hidden
 // contains information about tone type, pitch, rhythm, and amplitude
 struct Sequence {
 	float (*toneGeneratorFunction)(int, float, float);
