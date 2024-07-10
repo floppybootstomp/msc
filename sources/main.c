@@ -5,6 +5,7 @@
 
 #define SAMPLE_RATE 44100
 #define PI 3.1415926535
+#define MAX_VOLUME 1
 #define CLAMP(v, hi, lo) v > hi ? hi : (v < lo ? lo : v)
 
 // returns an array of frequencies given specified starting frequency, octave, and step size between octaves
@@ -234,7 +235,7 @@ void writeMaster(float* master, float length, int numTracks, int songLength, str
 
 		for(int i = 0; i < length * SAMPLE_RATE; i ++){
 			// limiter on master to prevent blowing out speakers
-			master[i] = CLAMP(master[i] + sampleBuffer[i], 1, -1);
+			master[i] = CLAMP(master[i] + sampleBuffer[i], MAX_VOLUME, -1 * MAX_VOLUME);
 		}
 	}
 }
