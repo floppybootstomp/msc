@@ -130,7 +130,7 @@ struct Sequence {
 	// length is the number of tones, totalLength is sum of the length of the tones
 	int length;
 	int totalLength;
-	float a, s, d, r;
+	float asdr[4];
 
 	// tones[][0] = pitch
 	// tones[][1] = rhythm (in fractions of a second: seconds / tones[][1])
@@ -138,7 +138,6 @@ struct Sequence {
 	float* tones[3];
 };
 
-// TODO: change the length to be in segments based on SAMPLE_RATE and tempo rather than relative to each other
 // contains information about a track's sequence and length for arrangement
 struct Track {
 	// the length of the track
@@ -159,7 +158,7 @@ static float calculateSequenceLength(float rhy[], int length){
 }
 
 // initializes a sequence with given values
-struct Sequence initializeSequence(float (*toneGeneratorFunction)(int, float, float), float* scale, float tempo, float repeat, int length, float a, float s, float d, float r, float* tones[3]){
+struct Sequence initializeSequence(float (*toneGeneratorFunction)(int, float, float), float* scale, float tempo, float repeat, int length, float asdr[4], float* tones[3]){
 	return ((struct Sequence) {
 		toneGeneratorFunction,
 		scale,
@@ -167,28 +166,24 @@ struct Sequence initializeSequence(float (*toneGeneratorFunction)(int, float, fl
 		repeat,
 		length,
 		(int)(calculateSequenceLength(tones[1], length) * SAMPLE_RATE * 2),
-		a,
-		s,
-		d,
-		r,
+		{ asdr[0], asdr[1], asdr[2], asdr[3] },
 		{ tones[0], tones[1], tones[2] }
 	});
 }
 
 // writes a sequence to a sample buffer
-void writeSequence(float* sample, float length, struct Sequence* seq){
+void writeSequence(float* sample, float length, float sampleWidth, struct Sequence* seq){
 	int bufferPos = 0;
 	int nextNoteSpace = 0;
 	float totalLength = 0;
-	float asdr[] = { seq->a, seq->s, seq->d, seq->r };
 
 	for(int i = 0; i < seq->length; i ++){
 		totalLength += seq->tones[1][i];
 	}
-	totalLength *= (SAMPLE_RATE * (1.0 / seq->tempo));
+	totalLength *= sampleWidth;
 
 	for(int i = 0;
-		bufferPos <= length - (nextNoteSpace = SAMPLE_RATE * (1.0 / (seq->tempo * seq->tones[1][i])));
+		bufferPos <= length - (nextNoteSpace = sampleWidth * (1.0 / seq->tones[1][i]));
 		i = (i+1)%seq->length){
 		generateTone(
 			&sample[bufferPos],
@@ -196,7 +191,7 @@ void writeSequence(float* sample, float length, struct Sequence* seq){
 			nextNoteSpace,
 			seq->scale[(int)seq->tones[0][i]],
 			seq->tones[2][i] * 0.01,
-			asdr,
+			seq->asdr,
 			seq->toneGeneratorFunction
 		);
 
@@ -209,15 +204,20 @@ void writeTrackBuffer(float* sampleBuffer, float length, int songLength, struct 
 	for(int i = 0; i < length * SAMPLE_RATE; i ++)
 		sampleBuffer[i] = 0;
 
-	float bufferPos = 0;
+	float trackLengthWritten = 0;
+	float sampleWidth = 0;
 	for(int trackPos = 0; trackPos < songLength; trackPos ++){
-		if(trackPos > 0)
-			bufferPos += tracks[trackPos-1].length > 0 ? tracks[trackPos-1].length : -1 * tracks[trackPos-1].length;
+		sampleWidth = SAMPLE_RATE * (1.0 / tracks[trackPos].seq.tempo);
+
+		if(trackPos > 0){
+			trackLengthWritten += tracks[trackPos-1].length > 0 ? tracks[trackPos-1].length : -1 * tracks[trackPos-1].length;
+		}
 
 		if(tracks[trackPos].length > 0)
 			writeSequence(
-				&sampleBuffer[(int)(tracks[trackPos].seq.totalLength * bufferPos)],
-				tracks[trackPos].seq.totalLength * tracks[trackPos].length,
+				&sampleBuffer[(int)(trackLengthWritten * sampleWidth)],
+				tracks[trackPos].length * sampleWidth,
+				sampleWidth,
 				&tracks[trackPos].seq
 			);
 	}
@@ -258,13 +258,14 @@ int main(int argv, char* argc[]){
 					  aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa, aa };
 
 	float* tones[3] = {ton, rhy, amp};
+	float asdr[4] = { 0, aa * 0.01, 0, 0 };
 	struct Sequence seq = initializeSequence(
 		&generateSine,
 		s,
 		0.5,
 		1,
 		38,
-		0, aa * 0.01, 0, 0,
+		asdr,
 		tones
 	);
 
@@ -276,21 +277,25 @@ int main(int argv, char* argc[]){
 	float ampR[8] = { ab, ad, ac, ac, ab, ad, ac, ad };
 
 	float* tonesR[3] = {tonR, rhyR, ampR};
+	float asdrR[4] = { 0, 0, SAMPLE_RATE * 0.0625, 0 };
 	struct Sequence seqR = initializeSequence(
 		&generateNoise,
 		s,
 		0.5,
 		1,
 		8,
-		0, 0, SAMPLE_RATE * 0.0625, 0,
+		asdrR,
 		tonesR
 	);
 
 	// order tracks
-	struct Track mp = { 1, seq };
-	struct Track ms = { -0.25, seq };
-	struct Track rp = { seq.totalLength * (1.0 / seqR.totalLength), seqR };
-	struct Track rs = { -1 * ms.length * rp.length, seqR };
+	float sht = 2.625;	// 10.5 / 4
+	float lng = 10.5;	// 42 / 4
+
+	struct Track mp = { lng, seq };
+	struct Track ms = { -1 * sht, seq };
+	struct Track rp = { lng, seqR };
+	struct Track rs = { sht, seqR };
 
 	struct Track tracks[2][11] = {
 		{ ms, mp, mp, ms, mp, mp, ms },
