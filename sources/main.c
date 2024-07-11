@@ -58,7 +58,6 @@ float applyEnvelope(int i, int length, float strengthInit, float currStrength, f
 		ca = (s - strengthInit) * (1.0 / d);
 	else if(i > a && i < d)
 		ca = 0;
-
 	if(i > length-r && currStrength > 0)
 		ca = -1 * s * (1.0 / r);
 	else if(i > length-r)
@@ -80,7 +79,7 @@ void generateTone(float* samples, int filePos, int length, float frequency, floa
 	float ampTightness = 480;
 
 	for(i = 0; i < length; i ++){
-		samples[i] = dynAmp * toneGeneratorFunction(i+filePos, frequency, amplitude);
+		samples[i] += dynAmp * toneGeneratorFunction(i+filePos, frequency, amplitude);
 		dynAmp += applyEnvelope(
 			i,
 			length,
@@ -179,12 +178,6 @@ struct Sequence initializeSequence(float (*toneGeneratorFunction)(int, float, fl
 void writeSequence(float* sample, float length, float sampleWidth, struct Sequence* seq){
 	int bufferPos = 0;
 	int nextNoteSpace = 0;
-	float totalLength = 0;
-
-	for(int i = 0; i < seq->length; i ++){
-		totalLength += *(seq->tones)[1][i];
-	}
-	totalLength *= sampleWidth;
 
 	for(int i = 0;
 		bufferPos <= length - (nextNoteSpace = sampleWidth * (1.0 / (*(seq->tones))[1][i]));
@@ -205,15 +198,9 @@ void writeSequence(float* sample, float length, float sampleWidth, struct Sequen
 
 // writes a the sequences into a buffer based on the track arrangement for that sequence
 void writeTrackBuffer(float* sampleBuffer, float length, int songLength, struct Track tracks[songLength]){
-	// ONE LOOP OVER ENTIRE BUFFER
-	for(int i = 0; i < length * SAMPLE_RATE; i ++)
-		sampleBuffer[i] = 0;
-
-	// ONE LOOP OVER ENTIRE BUFFER
 	float trackLengthWritten = 0;
 	float sampleWidth = 0;
 	for(int trackPos = 0; trackPos < songLength; trackPos ++){
-		// set buffer position to next unwritten space
 		sampleWidth = SAMPLE_RATE * (1.0 / tracks[trackPos].seq.tempo);
 
 		if(trackPos > 0){
@@ -233,19 +220,15 @@ void writeTrackBuffer(float* sampleBuffer, float length, int songLength, struct 
 
 // combines sequence buffers into master sequence
 void writeMaster(float* master, float length, int numTracks, int songLength, struct Track tracks[numTracks][songLength]){
-	// ONE LOOP OVER ENTIRE BUFFER
 	for(int i = 0; i < length * SAMPLE_RATE; i ++)
 		master[i] = 0;
 
-	float *sampleBuffer = (float*)malloc(sizeof(float) * length * SAMPLE_RATE);
-	// NUMTRACKS LOOPS OVER ENTIRE BUFFER * 3
 	for(int trax = 0; trax < numTracks; trax ++){
-		writeTrackBuffer(sampleBuffer, length, songLength, &tracks[trax][0]);
+		writeTrackBuffer(master, length, songLength, &tracks[trax][0]);
+	}
 
-		for(int i = 0; i < length * SAMPLE_RATE; i ++){
-			// limiter on master to prevent blowing out speakers
-			master[i] = CLAMP(master[i] + sampleBuffer[i], MAX_VOLUME, -1 * MAX_VOLUME);
-		}
+	for(int i = 0; i < length * SAMPLE_RATE; i ++){
+		master[i] = CLAMP(master[i], 1, -1);
 	}
 }
 
