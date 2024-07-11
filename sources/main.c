@@ -1,11 +1,14 @@
+#include <sys/time.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define SAMPLE_RATE 44100
-#define PI 3.1415926535
 #define MAX_VOLUME 1
+#define PI 3.1415926535
+
 #define CLAMP(v, hi, lo) v > hi ? hi : (v < lo ? lo : v)
 
 // returns an array of frequencies given specified starting frequency, octave, and step size between octaves
@@ -32,7 +35,7 @@ void writeSample(const char* filename, float* sample, int sampleLength){
 	}
 
 	for(int i = 0; i < sampleLength; i ++){
-		// int16_t is a 16 bit integer but sample[i] is a 64 bit double 0 < x < 1
+		// int16_t is a 16 bit integer but sample[i] is a 64 bit double -1 * MAX_VOLUME < x < MAX_VOLUME
 		// 
 		int16_t output = (int16_t)(0x7FFF * sample[i]);
 		fwrite(&output, sizeof(char), sizeof(int16_t) * (1.0/sizeof(char)), f);
@@ -131,12 +134,12 @@ struct Sequence {
 	// length is the number of tones, totalLength is sum of the length of the tones
 	int length;
 	int totalLength;
-	float asdr[4];
+	float (*asdr)[4];
 
 	// tones[][0] = pitch
 	// tones[][1] = rhythm (in fractions of a second: seconds / tones[][1])
 	// tones[][2] = amplitude (max: 100, min: 0)
-	float* tones[3];
+  float* (*tones)[3];
 };
 
 // contains information about a track's sequence and length for arrangement
@@ -159,16 +162,16 @@ static float calculateSequenceLength(float rhy[], int length){
 }
 
 // initializes a sequence with given values
-struct Sequence initializeSequence(float (*toneGeneratorFunction)(int, float, float), float* scale, float tempo, float repeat, int length, float asdr[4], float* tones[3]){
+struct Sequence initializeSequence(float (*toneGeneratorFunction)(int, float, float), float* scale, float tempo, float repeat, int length, float (*asdr)[4], float* (*tones)[3]){
 	return ((struct Sequence) {
 		toneGeneratorFunction,
 		scale,
 		tempo,
 		repeat,
 		length,
-		(int)(calculateSequenceLength(tones[1], length) * SAMPLE_RATE * 2),
-		{ asdr[0], asdr[1], asdr[2], asdr[3] },
-		{ tones[0], tones[1], tones[2] }
+		(int)(calculateSequenceLength((*tones)[1], length) * SAMPLE_RATE * 2),
+	    asdr,
+		tones,
 	});
 }
 
@@ -179,20 +182,20 @@ void writeSequence(float* sample, float length, float sampleWidth, struct Sequen
 	float totalLength = 0;
 
 	for(int i = 0; i < seq->length; i ++){
-		totalLength += seq->tones[1][i];
+		totalLength += *(seq->tones)[1][i];
 	}
 	totalLength *= sampleWidth;
 
 	for(int i = 0;
-		bufferPos <= length - (nextNoteSpace = sampleWidth * (1.0 / seq->tones[1][i]));
+		bufferPos <= length - (nextNoteSpace = sampleWidth * (1.0 / (*(seq->tones))[1][i]));
 		i = (i+1)%seq->length){
 		generateTone(
 			&sample[bufferPos],
 			bufferPos,
 			nextNoteSpace,
-			seq->scale[(int)seq->tones[0][i]],
-			seq->tones[2][i] * 0.01,
-			seq->asdr,
+			seq->scale[(int)(*(seq->tones))[0][i]],
+			(*(seq->tones))[2][i] * 0.01,
+			*(seq->asdr),
 			seq->toneGeneratorFunction
 		);
 
@@ -202,18 +205,22 @@ void writeSequence(float* sample, float length, float sampleWidth, struct Sequen
 
 // writes a the sequences into a buffer based on the track arrangement for that sequence
 void writeTrackBuffer(float* sampleBuffer, float length, int songLength, struct Track tracks[songLength]){
+	// ONE LOOP OVER ENTIRE BUFFER
 	for(int i = 0; i < length * SAMPLE_RATE; i ++)
 		sampleBuffer[i] = 0;
 
+	// ONE LOOP OVER ENTIRE BUFFER
 	float trackLengthWritten = 0;
 	float sampleWidth = 0;
 	for(int trackPos = 0; trackPos < songLength; trackPos ++){
+		// set buffer position to next unwritten space
 		sampleWidth = SAMPLE_RATE * (1.0 / tracks[trackPos].seq.tempo);
 
 		if(trackPos > 0){
 			trackLengthWritten += tracks[trackPos-1].length > 0 ? tracks[trackPos-1].length : -1 * tracks[trackPos-1].length;
 		}
 
+		// write sequence
 		if(tracks[trackPos].length > 0)
 			writeSequence(
 				&sampleBuffer[(int)(trackLengthWritten * sampleWidth)],
@@ -226,10 +233,12 @@ void writeTrackBuffer(float* sampleBuffer, float length, int songLength, struct 
 
 // combines sequence buffers into master sequence
 void writeMaster(float* master, float length, int numTracks, int songLength, struct Track tracks[numTracks][songLength]){
+	// ONE LOOP OVER ENTIRE BUFFER
 	for(int i = 0; i < length * SAMPLE_RATE; i ++)
 		master[i] = 0;
 
 	float *sampleBuffer = (float*)malloc(sizeof(float) * length * SAMPLE_RATE);
+	// NUMTRACKS LOOPS OVER ENTIRE BUFFER * 3
 	for(int trax = 0; trax < numTracks; trax ++){
 		writeTrackBuffer(sampleBuffer, length, songLength, &tracks[trax][0]);
 
@@ -240,7 +249,15 @@ void writeMaster(float* master, float length, int numTracks, int songLength, str
 	}
 }
 
-int main(int argv, char* argc[]){
+int main(int argc, char* argv[]){
+	struct timeval s1, s2;
+	int timing = 0;
+	if(argc > 1 && strcmp(argv[1], "-t") == 0)
+		timing = 1;
+
+	if(timing == 1)
+		gettimeofday(&s1, NULL);
+
 	float duration = 17 * 6;
 	int	songLength = 4;
 	float* master = (float*)malloc(sizeof(float) * duration * songLength * SAMPLE_RATE);
@@ -266,8 +283,8 @@ int main(int argv, char* argc[]){
 		0.5,
 		1,
 		38,
-		asdr,
-		tones
+		&asdr,
+		&tones
 	);
 
 	float ab = 80-aa;
@@ -285,8 +302,8 @@ int main(int argv, char* argc[]){
 		0.5,
 		1,
 		8,
-		asdrR,
-		tonesR
+		&asdrR,
+		&tonesR
 	);
 
 	// order tracks
@@ -303,10 +320,34 @@ int main(int argv, char* argc[]){
 		{ rs, rp, rp, rs, rp, rp, rs }
 	};
 
+	if(timing == 1)
+		gettimeofday(&s2, NULL);
+
+	long unsigned int paid;
+
+	if(timing == 1){
+		paid = (s2.tv_usec - s1.tv_usec) * 0.001;
+		printf("allocation took %lu milliseconds\n", paid);
+		gettimeofday(&s1, NULL);
+	}
+
 	writeMaster(master, duration, 2, 11, tracks);
+
+	if(timing == 1){
+		gettimeofday(&s2, NULL);
+		paid = (s2.tv_usec - s1.tv_usec) * 0.001;
+		printf("writeMaster took %lu milliseconds\n", paid);
+		gettimeofday(&s1, NULL);
+	}
 
 	// write sample
 	writeSample(outputFile, master, (int)(SAMPLE_RATE * duration));
+
+	if(timing == 1){
+		gettimeofday(&s2, NULL);
+		paid = (s2.tv_usec - s1.tv_usec) * 0.001;
+		printf("writeSample took %lu milliseconds\n", paid);
+	}
 
 	free(s);
 	free(master);
